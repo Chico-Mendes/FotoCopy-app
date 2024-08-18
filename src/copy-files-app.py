@@ -1,5 +1,5 @@
 import os
-from tkinter import filedialog, Tk
+from tkinter import filedialog
 
 
 def get_file_path() -> str:
@@ -21,7 +21,7 @@ def read_file(file_path: str) -> list[str]:
     Returns a list of photo names from the file
     """
     try:
-        with open(file_path, "rt", encoding="utf-8") as file:
+        with open(file_path, encoding="utf-8") as file:
             photos = file.readlines()
     except FileNotFoundError:
         raise NotImplementedError("read_file", "Ficheiro não encontrado")
@@ -75,11 +75,11 @@ def copy_photos(file_path: str, photos_dir: str, output_dir: str) -> None:
     for photo in photos:
         photo = photo.strip()
         try:
-            with open(os.path.join(photos_dir, photo + extension), "rb") as file:
-                with open(
-                    os.path.join(output_dir, photo + extension), "wb"
-                ) as output_file:
-                    output_file.write(file.read())
+            with (
+                open(os.path.join(photos_dir, photo + extension), "rb") as file,
+                open(os.path.join(output_dir, photo + extension), "wb") as output_file,
+            ):
+                output_file.write(file.read())
         except Exception as e:
             raise NotImplementedError(
                 "copy_photos", f"Erro ao copiar foto {photo}: {e}"
