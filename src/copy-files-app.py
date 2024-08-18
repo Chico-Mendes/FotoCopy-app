@@ -1,15 +1,15 @@
 import os
-from tkinter import filedialog
+
+from PyQt6.QtWidgets import QApplication, QFileDialog
 
 
 def get_file_path() -> str:
     """
     Returns the path of the file selected by the user
     """
-    file_path = filedialog.askopenfilename(
-        defaultextension=".txt",
-        filetypes=[("Documento de texto", "*.txt")],
-        title="Selecionar ficheiro com lista de fotos a copiar",
+    file_path, _ = QFileDialog.getOpenFileName(
+        caption="Selecionar ficheiro com lista de fotos a copiar",
+        filter="Documento de texto (*.txt)",
     )
     if not file_path:
         raise NotImplementedError("get_file_path", "Ficheiro não selecionado")
@@ -34,8 +34,8 @@ def get_output_dir() -> str:
     """
     Returns the path of the output directory selected by the user
     """
-    output_dir = filedialog.askdirectory(
-        title="Selecionar pasta de destino para as fotos",
+    output_dir = QFileDialog.getExistingDirectory(
+        caption="Selecionar pasta de destino para as fotos",
     )
     if not output_dir:
         raise NotImplementedError("get_output_dir", "Pasta de destino não selecionada")
@@ -46,8 +46,8 @@ def get_photos_dir() -> str:
     """
     Returns the path of the photos directory selected by the user
     """
-    photos_dir = filedialog.askdirectory(
-        title="Selecionar pasta com as fotos",
+    photos_dir = QFileDialog.getExistingDirectory(
+        caption="Selecionar pasta com as fotos",
     )
     if not photos_dir:
         raise NotImplementedError(
@@ -87,6 +87,7 @@ def copy_photos(file_path: str, photos_dir: str, output_dir: str) -> None:
 
 
 def main() -> None:
+    QApplication([])
     try:
         file_path = get_file_path()
         print(f"{file_path = }")
@@ -96,7 +97,7 @@ def main() -> None:
         print(f"{output_dir = }")
         photos_dir = get_photos_dir()
         print(f"{photos_dir = }")
-        copy_photos(file_path, photos_dir, output_dir)
+        # copy_photos(file_path, photos_dir, output_dir)
     except NotImplementedError as e:
         print(f"Erro: {e}")
 
