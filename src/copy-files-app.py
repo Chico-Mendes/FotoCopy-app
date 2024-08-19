@@ -1,6 +1,9 @@
 import os
+from collections import Counter
 
 from PyQt6.QtWidgets import QApplication, QFileDialog
+
+VERSION = "0.2.1"
 
 
 def get_file_path() -> str:
@@ -16,18 +19,20 @@ def get_file_path() -> str:
     return file_path
 
 
-def read_file(file_path: str) -> list[str]:
+def read_file(file_path: str) -> Counter[str]:
     """
-    Returns a list of photo names from the file
+    Reads the file and returns a Counter with the photos names
     """
     try:
         with open(file_path, encoding="utf-8") as file:
-            photos = file.readlines()
+            photos: list[str] = file.readlines()
     except FileNotFoundError:
         raise NotImplementedError("read_file", "Ficheiro não encontrado")
     except Exception as e:
         raise NotImplementedError("read_file", f"Erro ao ler ficheiro: {e}")
-    return photos
+
+    counter: Counter[str] = Counter([p.strip() for p in photos])
+    return counter
 
 
 def get_output_dir() -> str:
@@ -36,6 +41,7 @@ def get_output_dir() -> str:
     """
     output_dir = QFileDialog.getExistingDirectory(
         caption="Selecionar pasta de destino para as fotos",
+        options=QFileDialog.Option.HideNameFilterDetails,
     )
     if not output_dir:
         raise NotImplementedError("get_output_dir", "Pasta de destino não selecionada")
@@ -48,6 +54,7 @@ def get_photos_dir() -> str:
     """
     photos_dir = QFileDialog.getExistingDirectory(
         caption="Selecionar pasta com as fotos",
+        options=QFileDialog.Option.HideNameFilterDetails,
     )
     if not photos_dir:
         raise NotImplementedError(
@@ -60,44 +67,49 @@ def get_photos_extension() -> str:
     """
     Returns the extension of the photos
     """
-    # return ".txt"
+    return ".txt"
     # return ".jpg"
-    return ".png"
+    # return ".png"
 
 
-def copy_photos(file_path: str, photos_dir: str, output_dir: str) -> None:
+def copy_photos(photos: Counter[str], photos_dir: str, output_dir: str) -> None:
     """
-    Copies the photos from the list to the output directory
+    Copies the photos from the photos directory to the output directory
     """
-    photos = read_file(file_path)
-    print(f"{photos = }")
-    extension = get_photos_extension()
+    extension: str = get_photos_extension()
     for photo in photos:
-        photo = photo.strip()
-        try:
-            with (
-                open(os.path.join(photos_dir, photo + extension), "rb") as file,
-                open(os.path.join(output_dir, photo + extension), "wb") as output_file,
-            ):
-                output_file.write(file.read())
-        except Exception as e:
-            raise NotImplementedError(
-                "copy_photos", f"Erro ao copiar foto {photo}: {e}"
-            )
+        for count in range(1, photos[photo] + 1):
+            out_photo: str = photo
+            if photos[photo] > 1:
+                out_photo += f" ({count})"
+            try:
+                with (
+                    open(os.path.join(photos_dir, photo + extension), "rb") as file,
+                    open(
+                        os.path.join(output_dir, out_photo + extension), "wb"
+                    ) as output_file,
+                ):
+                    output_file.write(file.read())
+            except Exception as e:
+                raise NotImplementedError(
+                    "copy_photos", f"Erro ao copiar foto {out_photo!r}: {e}"
+                )
 
 
 def main() -> None:
-    QApplication([])
+    app = QApplication([])
     try:
         file_path = get_file_path()
         print(f"{file_path = }")
-        # photos = read_file(file_path)
-        # print(f"{photos = }")
+        photos = read_file(file_path)
+        print(f"{photos = }")
         output_dir = get_output_dir()
         print(f"{output_dir = }")
         photos_dir = get_photos_dir()
         print(f"{photos_dir = }")
-        # copy_photos(file_path, photos_dir, output_dir)
+        copy_photos(photos, photos_dir, output_dir)
+
+        app.exit(0)
     except NotImplementedError as e:
         print(f"Erro: {e}")
 
