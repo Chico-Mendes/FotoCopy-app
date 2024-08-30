@@ -1,5 +1,5 @@
 #define appName "FotoCopy"
-#define appVersion "0.3.0"
+#define appVersion "1.0.0"
 #define sourceFile "copy-files-app.exe"
 
 [Setup]
@@ -15,7 +15,7 @@ Compression=lzma
 SolidCompression=yes
 
 [Files]
-Source: "{#sourceFile}"; DestDir: "{app}"; DestName: "{#appName}.exe"; Flags: ignoreversion
+Source: "{#sourceFile}"; DestDir: "{app}"; DestName: "{#appName}.exe"
 
 [Icons]
 Name: "{group}\{#appName}"; Filename: "{app}\{#appName}"
