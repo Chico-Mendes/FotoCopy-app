@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 
 
 def getSettings() -> QSettings:
@@ -108,9 +108,9 @@ class MyLabel(QLabel):
 
 
 class MyLineEdit(QLineEdit):
-    def __init__(self, text: str) -> None:
+    def __init__(self, text: str, readOnly: bool = True) -> None:
         super().__init__()
-        self.setReadOnly(True)
+        self.setReadOnly(readOnly)
         self.setText(text)
         # Increase font size
         font = self.font()
@@ -236,11 +236,15 @@ class ChoiceWindow(QMainWindow):
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
         self.photos_ext_combo = MyComboBox()
-        self.photos_ext_combo.addItem(".jpg")
-        self.photos_ext_combo.addItem(".png")
+        self.photos_ext_combo.addItems([".jpg", ".cr3", "Outra..."])
+        self.photos_ext_combo.currentIndexChanged.connect(self.on_ext_combo_change)
+        self.photos_ext_edit = MyLineEdit("", readOnly=False)
+        self.photos_ext_edit.setMinimumWidth(75)
+        self.photos_ext_edit.hide()
         photos_ext_layout = QHBoxLayout()
         photos_ext_layout.addWidget(self.photos_ext_label)
         photos_ext_layout.addWidget(self.photos_ext_combo)
+        photos_ext_layout.addWidget(self.photos_ext_edit)
         photos_ext_layout.setAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
@@ -382,6 +386,17 @@ class ChoiceWindow(QMainWindow):
         else:
             self.next_button.setEnabled(False)
 
+    def on_ext_combo_change(self, index: int) -> None:
+        """
+        Shows or hides the line edit for custom photo extension
+        """
+        if self.photos_ext_combo.currentText() == "Outra...":
+            self.photos_ext_edit.show()
+            self.photos_ext_edit.setFocus()
+        else:
+            self.photos_ext_edit.hide()
+            self.photos_ext_edit.setText("")
+
     def next(self) -> None:
         """
         Goes to the next window
@@ -394,6 +409,13 @@ class ChoiceWindow(QMainWindow):
             self.settings.setValue("dest_dir", self.dest_dir)
 
         self.photos_ext: str = self.photos_ext_combo.currentText()
+        if self.photos_ext == "Outra...":
+            self.photos_ext = self.photos_ext_edit.text().strip()
+            if not self.photos_ext.startswith("."):
+                self.photos_ext = "." + self.photos_ext
+            if len(self.photos_ext) < 2:
+                self.photos_ext = ".jpg"  # Default extension
+
         self.close()
         self.next_window.show()
         self.next_window.start_copy_process(
