@@ -7,7 +7,7 @@ from typing import Any
 
 import pandas as pd
 import platformdirs
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import QCoreApplication, QSettings, Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -23,7 +23,20 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
+
+
+def getSettings() -> QSettings:
+    """
+    Return a shared QSettings instance in user space (.ini file).
+    """
+    settings = QSettings(
+        QSettings.Format.IniFormat,
+        QSettings.Scope.UserScope,
+        QCoreApplication.organizationName(),
+        QCoreApplication.applicationName(),
+    )
+    return settings
 
 
 class CopyOutcome(Enum):
@@ -126,7 +139,7 @@ class MyComboBox(QComboBox):
 class InitWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("FotoCopy App")
+        self.setWindowTitle(QCoreApplication.applicationName())
         self.setFixedSize(400, 250)
 
         self.next_window = ChoiceWindow()
@@ -135,7 +148,7 @@ class InitWindow(QMainWindow):
         layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         layout.addStretch(0)
 
-        self.label = QLabel("FotoCopy App")
+        self.label = QLabel(QCoreApplication.applicationName())
         self.label.setWordWrap(True)
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         # Increase font size
@@ -144,7 +157,7 @@ class InitWindow(QMainWindow):
         self.label.setFont(font)
         layout.addWidget(self.label)
 
-        self.version_label = QLabel(f"Versão: {__version__}")
+        self.version_label = QLabel(f"Versão: {QCoreApplication.applicationVersion()}")
         self.version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         font.setPointSize(8)
         font.setItalic(True)
@@ -172,10 +185,14 @@ class InitWindow(QMainWindow):
 class ChoiceWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("FotoCopy App")
+        self.setWindowTitle(QCoreApplication.applicationName())
         self.setFixedSize(600, 450)
 
         self.next_window = CopyWindow()
+        self.settings = getSettings()
+        self.file_path: str = self.settings.value("file_path", "", type=str)
+        self.source_dir: str = self.settings.value("source_dir", "", type=str)
+        self.dest_dir: str = self.settings.value("dest_dir", "", type=str)
 
         layout = QVBoxLayout()
 
@@ -257,6 +274,14 @@ class ChoiceWindow(QMainWindow):
         next_layout.setContentsMargins(0, 0, 0, 10)
         layout.addLayout(next_layout)
 
+        # Set previous paths
+        if self.file_path:
+            self.file_line_edit.setText(self.file_path)
+        if self.source_dir:
+            self.source_dir_line_edit.setText(self.source_dir)
+        if self.dest_dir:
+            self.dest_dir_line_edit.setText(self.dest_dir)
+
         widget = QWidget()
         widget.setLayout(layout)
         self.setCentralWidget(widget)
@@ -265,73 +290,83 @@ class ChoiceWindow(QMainWindow):
         """
         Returns the path of the file selected by the user
         """
-        if not hasattr(self, "initial_path"):
+        if not self.file_path and not hasattr(self, "initial_path"):
             self.initial_path: str = platformdirs.user_desktop_dir()
+        else:
+            self.initial_path = os.path.dirname(self.file_path)
+
         file_path, _ = QFileDialog.getOpenFileName(
             caption="Selecionar ficheiro com lista de fotos a copiar",
             directory=self.initial_path,
             filter="Documento de texto (*.txt);;Ficheiro Excel (*.xls *.xlsx)",
             initialFilter="Ficheiro Excel (*.xls *.xlsx)",
         )
+
         if file_path:
-            self.file_path: str = file_path
+            self.file_path = file_path
             self.file_line_edit.setText(file_path)
             self.initial_path = os.path.dirname(file_path)
-        elif not hasattr(self, "file_path"):
+        elif not self.file_path:
             self.file_line_edit.setText("Ficheiro não selecionado")
 
     def get_source_dir(self) -> None:
         """
         Returns the path of the photos directory selected by the user
         """
-        if not hasattr(self, "initial_path"):
+        if not self.source_dir and not hasattr(self, "initial_path"):
             self.initial_path = platformdirs.user_desktop_dir()
+        else:
+            self.initial_path = self.source_dir
+
         source_dir = QFileDialog.getExistingDirectory(
             caption="Selecionar pasta com as fotos",
             directory=self.initial_path,
             options=QFileDialog.Option.HideNameFilterDetails,
         )
+
         if source_dir:
-            if hasattr(self, "dest_dir") and source_dir == self.dest_dir:
-                if hasattr(self, "source_dir"):
-                    del self.source_dir
+            if source_dir == self.dest_dir:
+                self.source_dir = ""
                 self.source_dir_line_edit.setText(
                     "Atenção: pasta de destino igual à pasta das fotos"
                 )
                 self.source_dir_line_edit.setStyleSheet("color: red;")
             else:
-                self.source_dir: str = source_dir
+                self.source_dir = source_dir
                 self.source_dir_line_edit.setText(source_dir)
                 self.source_dir_line_edit.setStyleSheet("color: black;")
                 self.initial_path = source_dir
-        elif not hasattr(self, "source_dir"):
+        elif not self.source_dir:
             self.source_dir_line_edit.setText("Pasta não selecionada")
 
     def get_dest_dir(self) -> None:
         """
         Returns the path of the output directory selected by the user
         """
-        if not hasattr(self, "initial_path"):
+        if not self.dest_dir and not hasattr(self, "initial_path"):
             self.initial_path = platformdirs.user_desktop_dir()
+        else:
+            self.initial_path = self.dest_dir
+
         dest_dir = QFileDialog.getExistingDirectory(
             caption="Selecionar pasta de destino para as fotos",
             directory=self.initial_path,
             options=QFileDialog.Option.HideNameFilterDetails,
         )
+
         if dest_dir:
-            if hasattr(self, "source_dir") and dest_dir == self.source_dir:
-                if hasattr(self, "dest_dir"):
-                    del self.dest_dir
+            if dest_dir == self.source_dir:
+                self.dest_dir = ""
                 self.dest_dir_line_edit.setText(
                     "Atenção: pasta de destino igual à pasta das fotos"
                 )
                 self.dest_dir_line_edit.setStyleSheet("color: red;")
             else:
-                self.dest_dir: str = dest_dir
+                self.dest_dir = dest_dir
                 self.dest_dir_line_edit.setText(dest_dir)
                 self.dest_dir_line_edit.setStyleSheet("color: black;")
                 self.initial_path = dest_dir
-        elif not hasattr(self, "dest_dir"):
+        elif not self.dest_dir:
             self.dest_dir_line_edit.setText("Pasta não selecionada")
 
     def content_changed(self) -> None:
@@ -351,12 +386,13 @@ class ChoiceWindow(QMainWindow):
         """
         Goes to the next window
         """
-        if (
-            not hasattr(self, "file_path")
-            or not hasattr(self, "source_dir")
-            or not hasattr(self, "dest_dir")
-        ):
+        if not self.file_path or not self.source_dir or not self.dest_dir:
             return
+        else:
+            self.settings.setValue("file_path", self.file_path)
+            self.settings.setValue("source_dir", self.source_dir)
+            self.settings.setValue("dest_dir", self.dest_dir)
+
         self.photos_ext: str = self.photos_ext_combo.currentText()
         self.close()
         self.next_window.show()
@@ -368,7 +404,7 @@ class ChoiceWindow(QMainWindow):
 class CopyWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("FotoCopy App")
+        self.setWindowTitle(QCoreApplication.applicationName())
         self.setFixedSize(600, 250)
 
         layout = QVBoxLayout()
@@ -521,6 +557,10 @@ class CopyWindow(QMainWindow):
 
 def main() -> None:
     app = QApplication([])
+
+    QCoreApplication.setOrganizationName("ChicoApps")
+    QCoreApplication.setApplicationName("FotoCopy")
+    QCoreApplication.setApplicationVersion(__version__)
 
     initWindow = InitWindow()
     initWindow.show()
