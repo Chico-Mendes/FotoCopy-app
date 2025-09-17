@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import sys
 from collections import Counter
@@ -23,7 +24,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-__version__ = "1.0.2"
+__version__ = "1.0.3"
 
 
 def getSettings() -> QSettings:
@@ -238,9 +239,12 @@ class ChoiceWindow(QMainWindow):
         self.photos_ext_combo = MyComboBox()
         self.photos_ext_combo.addItems([".jpg", ".cr3", "Outra..."])
         self.photos_ext_combo.currentIndexChanged.connect(self.on_ext_combo_change)
+        self.photos_ext_combo.currentIndexChanged.connect(self.content_changed)
         self.photos_ext_edit = MyLineEdit("", readOnly=False)
         self.photos_ext_edit.setMinimumWidth(75)
         self.photos_ext_edit.hide()
+        self.photos_ext_edit.textChanged.connect(self.on_ext_edit_change)
+        self.photos_ext_edit.textChanged.connect(self.content_changed)
         photos_ext_layout = QHBoxLayout()
         photos_ext_layout.addWidget(self.photos_ext_label)
         photos_ext_layout.addWidget(self.photos_ext_combo)
@@ -248,7 +252,7 @@ class ChoiceWindow(QMainWindow):
         photos_ext_layout.setAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
-        photos_ext_layout.setContentsMargins(0, 0, 0, 10)
+        photos_ext_layout.setContentsMargins(0, 0, 10, 10)
         layout.addLayout(photos_ext_layout)
 
         # OUTPUT DIR
@@ -278,13 +282,25 @@ class ChoiceWindow(QMainWindow):
         next_layout.setContentsMargins(0, 0, 0, 10)
         layout.addLayout(next_layout)
 
-        # Set previous paths
+        # Set previous values and booleans
+        self.file_bool: bool = False
+        self.source_bool: bool = False
+        self.photos_ext_bool: bool = True
+        self.dest_bool: bool = False
+
         if self.file_path:
+            self.file_bool = True
             self.file_line_edit.setText(self.file_path)
+
         if self.source_dir:
+            self.source_bool = True
             self.source_dir_line_edit.setText(self.source_dir)
-        if self.dest_dir:
+
+        if self.dest_dir and self.dest_dir != self.source_dir:
+            self.dest_bool = True
             self.dest_dir_line_edit.setText(self.dest_dir)
+        elif self.dest_dir == self.source_dir:
+            self.dest_dir = ""
 
         widget = QWidget()
         widget.setLayout(layout)
@@ -307,10 +323,12 @@ class ChoiceWindow(QMainWindow):
         )
 
         if file_path:
+            self.file_bool = True
             self.file_path = file_path
             self.file_line_edit.setText(file_path)
             self.initial_path = os.path.dirname(file_path)
         elif not self.file_path:
+            self.file_bool = False
             self.file_line_edit.setText("Ficheiro não selecionado")
 
     def get_source_dir(self) -> None:
@@ -330,17 +348,20 @@ class ChoiceWindow(QMainWindow):
 
         if source_dir:
             if source_dir == self.dest_dir:
+                self.source_bool = False
                 self.source_dir = ""
                 self.source_dir_line_edit.setText(
                     "Atenção: pasta de destino igual à pasta das fotos"
                 )
                 self.source_dir_line_edit.setStyleSheet("color: red;")
             else:
+                self.source_bool = True
                 self.source_dir = source_dir
                 self.source_dir_line_edit.setText(source_dir)
                 self.source_dir_line_edit.setStyleSheet("color: black;")
                 self.initial_path = source_dir
         elif not self.source_dir:
+            self.source_bool = False
             self.source_dir_line_edit.setText("Pasta não selecionada")
 
     def get_dest_dir(self) -> None:
@@ -360,42 +381,66 @@ class ChoiceWindow(QMainWindow):
 
         if dest_dir:
             if dest_dir == self.source_dir:
+                self.dest_bool = False
                 self.dest_dir = ""
                 self.dest_dir_line_edit.setText(
                     "Atenção: pasta de destino igual à pasta das fotos"
                 )
                 self.dest_dir_line_edit.setStyleSheet("color: red;")
             else:
+                self.dest_bool = True
                 self.dest_dir = dest_dir
                 self.dest_dir_line_edit.setText(dest_dir)
                 self.dest_dir_line_edit.setStyleSheet("color: black;")
                 self.initial_path = dest_dir
         elif not self.dest_dir:
+            self.dest_bool = False
             self.dest_dir_line_edit.setText("Pasta não selecionada")
 
-    def content_changed(self) -> None:
-        """
-        Checks if the content of the widgets has changed
-        """
-        if (
-            hasattr(self, "file_path")
-            and hasattr(self, "source_dir")
-            and hasattr(self, "dest_dir")
-        ):
-            self.next_button.setEnabled(True)
-        else:
-            self.next_button.setEnabled(False)
-
-    def on_ext_combo_change(self, index: int) -> None:
+    def on_ext_combo_change(self) -> None:
         """
         Shows or hides the line edit for custom photo extension
         """
         if self.photos_ext_combo.currentText() == "Outra...":
+            self.photos_ext_bool = False
+            self.photos_ext_edit.setText(".")
             self.photos_ext_edit.show()
             self.photos_ext_edit.setFocus()
         else:
+            self.photos_ext_bool = True
             self.photos_ext_edit.hide()
-            self.photos_ext_edit.setText("")
+
+    def on_ext_edit_change(self, text: str) -> None:
+        """
+        Validates the custom photo extension
+        """
+        pattern = re.compile(r"^(\.[a-zA-Z0-9]+)+$")
+        text = text.strip().lower()
+
+        self.photos_ext_edit.blockSignals(True)
+        self.photos_ext_edit.setText(text)
+
+        if not text.startswith("."):
+            text = "." + text
+            self.photos_ext_edit.setText(text)
+
+        self.photos_ext_edit.blockSignals(False)
+
+        self.photos_ext_bool = pattern.match(text) is not None
+
+    def content_changed(self) -> None:
+        """
+        Checks if the content of the widgets is valid to enable the next button
+        """
+        if (
+            self.file_bool
+            and self.source_bool
+            and self.photos_ext_bool
+            and self.dest_bool
+        ):
+            self.next_button.setEnabled(True)
+        else:
+            self.next_button.setEnabled(False)
 
     def next(self) -> None:
         """
@@ -411,10 +456,6 @@ class ChoiceWindow(QMainWindow):
         self.photos_ext: str = self.photos_ext_combo.currentText()
         if self.photos_ext == "Outra...":
             self.photos_ext = self.photos_ext_edit.text().strip()
-            if not self.photos_ext.startswith("."):
-                self.photos_ext = "." + self.photos_ext
-            if len(self.photos_ext) < 2:
-                self.photos_ext = ".jpg"  # Default extension
 
         self.close()
         self.next_window.show()
