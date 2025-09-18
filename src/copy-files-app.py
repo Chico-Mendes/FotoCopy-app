@@ -24,10 +24,10 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-__version__ = "1.0.3"
+__version__ = "1.0.4"
 
 
-def getSettings() -> QSettings:
+def get_settings() -> QSettings:
     """
     Return a shared QSettings instance in user space (.ini file).
     """
@@ -40,6 +40,18 @@ def getSettings() -> QSettings:
     return settings
 
 
+def get_formatted_photo_name(photos_format: str, photo_number: int) -> str:
+    """
+    Return the formatted photo name based on the given format and photo number.
+    """
+    match = re.search(r"(#+)", photos_format)
+    if not match:
+        raise ValueError("Invalid photos format: no '#' found.")
+
+    num_hashes = len(match.group(0))
+    return photos_format.replace(match.group(0), str(photo_number).zfill(num_hashes))
+
+
 class CopyOutcome(Enum):
     SUCCESS = 1
     FINISH_ERRORS = 2
@@ -48,63 +60,95 @@ class CopyOutcome(Enum):
 
 class CopyThread(QThread):
     progress = pyqtSignal(int)
-    error_log = pyqtSignal(str)
+    update_log = pyqtSignal(str)
     finished = pyqtSignal(CopyOutcome)
 
     def __init__(
-        self, source_dir: str, dest_dir: str, photos: Counter[str], photos_ext: str
+        self,
+        source_dir: str,
+        dest_dir: str,
+        photos: Counter[str],
+        photos_ext: str,
+        photos_format: str,
     ) -> None:
         super().__init__()
         self.source_dir: str = source_dir
         self.dest_dir: str = dest_dir
         self.photos: Counter[str] = photos
         self.photos_ext: str = photos_ext
+        self.photos_format: str = photos_format
+        self.__total_photos: int = photos.total()
+        self.__copied_photos: int = 0
 
     def run(self) -> None:
-        total_photos: int = self.photos.total()
-        i: int = 0
         errors: bool = False
-        for photo in sorted(self.photos, key=lambda x: int(x) if x.isdigit() else x):
-            for k in range(1, self.photos[photo] + 1):
-                out_photo: str = photo
-                if self.photos[photo] > 1:
-                    out_photo += f" ({k})"
-
-                src_file = os.path.join(self.source_dir, photo + self.photos_ext)
-                dest_file = os.path.join(self.dest_dir, out_photo + self.photos_ext)
-                try:
-                    shutil.copyfile(src_file, dest_file)
-                    i += 1
-                except FileNotFoundError:
-                    k_missing: int = self.photos[photo] + 1 - k
-                    self.error_log.emit(
-                        f"<span style='color: red;'>Ficheiro {photo + self.photos_ext!r} não encontrado (não foram copiadas {k_missing} fotos)!</span>"
-                    )
+        if not self.photos_format:
+            # Copy photos using the names in the file
+            for photo, count in self.photos.items():
+                if not self.copy_n_photos(photo, count):
                     errors = True
-                    i += k_missing
-                    break
-                except OSError as e:
-                    self.error_log.emit(
-                        f"<span style='color: goldenrod;'>Erro ao copiar foto {photo + self.photos_ext!r}: {e}</span>"
-                    )
+        else:
+            for photo, count in self.photos.items():
+                formatted_name = get_formatted_photo_name(
+                    self.photos_format, int(photo)
+                )
+                if not self.copy_n_photos(formatted_name, count):
                     errors = True
-                finally:
-                    # Emit progress signal
-                    self.progress.emit(int((i + 1) / total_photos * 100))
 
         if errors:
             self.finished.emit(CopyOutcome.FINISH_ERRORS)
         else:
             self.finished.emit(CopyOutcome.SUCCESS)
 
+    def copy_n_photos(self, photo: str, n: int) -> bool:
+        """
+        Copy a photo n times.
+        Returns True if all copies were successful, False otherwise.
+        """
+        self.update_log.emit(f"A copiar {n} fotos {photo + self.photos_ext!r}...")
+        all_copied = True
+        for k in range(1, n + 1):
+            out_photo: str = photo
+            if n > 1:
+                out_photo += f" ({k})"
+
+            src_file = os.path.join(self.source_dir, photo + self.photos_ext)
+            dest_file = os.path.join(self.dest_dir, out_photo + self.photos_ext)
+            try:
+                shutil.copyfile(src_file, dest_file)
+                self.__copied_photos += 1
+            except FileNotFoundError:
+                k_missing: int = n - k + 1
+                self.update_log.emit(
+                    f"<span style='color: red;'>Ficheiro {photo + self.photos_ext!r} não encontrado (não foram copiadas {k_missing} fotos)!</span>"
+                )
+                all_copied = False
+                self.__copied_photos += k_missing
+                break
+            except OSError as e:
+                k_missing = n - k + 1
+                self.update_log.emit(
+                    f"<span style='color: red;'>Erro ao copiar foto {photo + self.photos_ext!r} (não foram copiadas {k_missing} fotos): {e}</span>"
+                )
+                all_copied = False
+                self.__copied_photos += k_missing
+                break
+            finally:
+                # Emit progress signal
+                self.progress.emit(
+                    int(self.__copied_photos / self.__total_photos * 100)
+                )
+
+        return all_copied
+
 
 class MyLabel(QLabel):
-    def __init__(self, text: str) -> None:
+    def __init__(self, text: str, pointSize: int = 12) -> None:
         super().__init__(text)
         self.setWordWrap(True)
         # Increase font size
         font = self.font()
-        font.setPointSize(12)
+        font.setPointSize(pointSize)
         self.setFont(font)
 
 
@@ -190,9 +234,10 @@ class ChoiceWindow(QMainWindow):
         self.setFixedSize(600, 450)
 
         self.next_window = CopyWindow()
-        self.settings = getSettings()
+        self.settings = get_settings()
         self.file_path: str = self.settings.value("file_path", "", type=str)
         self.source_dir: str = self.settings.value("source_dir", "", type=str)
+        self.photos_format: str = self.settings.value("photos_format", "###", type=str)
         self.dest_dir: str = self.settings.value("dest_dir", "", type=str)
 
         layout = QVBoxLayout()
@@ -255,6 +300,25 @@ class ChoiceWindow(QMainWindow):
         photos_ext_layout.setContentsMargins(0, 0, 10, 10)
         layout.addLayout(photos_ext_layout)
 
+        # PHOTOS NAME FORMAT
+        self.photos_format_label = MyLabel("Formato dos nomes das fotos:")
+        self.photos_format_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom
+        )
+        layout.addWidget(self.photos_format_label)
+        self.photos_format_line_edit = MyLineEdit("", readOnly=False)
+        self.photos_format_line_edit.setFixedWidth(250)
+        self.photos_format_example = MyLabel("", 10)
+        self.photos_format_line_edit.textChanged.connect(self.on_photos_format_change)
+        self.photos_format_layout = QHBoxLayout()
+        self.photos_format_layout.addWidget(self.photos_format_line_edit)
+        self.photos_format_layout.addWidget(self.photos_format_example)
+        self.photos_format_layout.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        self.photos_format_layout.setContentsMargins(10, 0, 10, 10)
+        layout.addLayout(self.photos_format_layout)
+
         # OUTPUT DIR
         self.dest_dir_label = MyLabel("Pasta de destino:")
         self.dest_dir_label.setAlignment(
@@ -286,6 +350,7 @@ class ChoiceWindow(QMainWindow):
         self.file_bool: bool = False
         self.source_bool: bool = False
         self.photos_ext_bool: bool = True
+        self.photos_format_bool: bool = False
         self.dest_bool: bool = False
 
         if self.file_path:
@@ -295,6 +360,8 @@ class ChoiceWindow(QMainWindow):
         if self.source_dir:
             self.source_bool = True
             self.source_dir_line_edit.setText(self.source_dir)
+
+        self.photos_format_line_edit.setText(self.photos_format)
 
         if self.dest_dir and self.dest_dir != self.source_dir:
             self.dest_bool = True
@@ -428,6 +495,51 @@ class ChoiceWindow(QMainWindow):
 
         self.photos_ext_bool = pattern.match(text) is not None
 
+    def on_photos_format_change(self, text: str) -> None:
+        """
+        Validates the photos name format
+        """
+        invalid_chars = r'[<>:"/\\|?*\']'
+        if re.search(invalid_chars, text):
+            self.photos_format_example.setText("(Caracteres inválidos: <>:\"/\\|?*')")
+            self.photos_format_example.setStyleSheet("color: red;")
+            self.photos_format_bool = False
+            return
+
+        text = text.strip()
+        if not text:
+            self.photos_format_example.setText("(A usar o nome indicado no ficheiro)")
+            self.photos_format_example.setStyleSheet("color: black;")
+            self.photos_format = ""
+            self.photos_format_bool = True
+            return
+
+        matches = re.findall(r"(#+)", text)
+        if not matches:
+            self.photos_format_example.setText("(Use # para indicar números)")
+            self.photos_format_example.setStyleSheet("color: red;")
+            self.photos_format_bool = False
+            return
+        elif len(matches) > 1:
+            self.photos_format_example.setText("(Apenas um grupo de # é permitido)")
+            self.photos_format_example.setStyleSheet("color: red;")
+            self.photos_format_bool = False
+            return
+        else:
+            self.photos_format_example.setStyleSheet("color: black;")
+
+        self.photos_format = text
+        self.photos_format_bool = True
+
+        example: str = (
+            "Ex.: "
+            + get_formatted_photo_name(text, 0)
+            + ", "
+            + get_formatted_photo_name(text, 1)
+            + ", ..."
+        )
+        self.photos_format_example.setText(example)
+
     def content_changed(self) -> None:
         """
         Checks if the content of the widgets is valid to enable the next button
@@ -436,6 +548,7 @@ class ChoiceWindow(QMainWindow):
             self.file_bool
             and self.source_bool
             and self.photos_ext_bool
+            and self.photos_format_bool
             and self.dest_bool
         ):
             self.next_button.setEnabled(True)
@@ -452,6 +565,7 @@ class ChoiceWindow(QMainWindow):
             self.settings.setValue("file_path", self.file_path)
             self.settings.setValue("source_dir", self.source_dir)
             self.settings.setValue("dest_dir", self.dest_dir)
+            self.settings.setValue("photos_format", self.photos_format)
 
         self.photos_ext: str = self.photos_ext_combo.currentText()
         if self.photos_ext == "Outra...":
@@ -460,7 +574,11 @@ class ChoiceWindow(QMainWindow):
         self.close()
         self.next_window.show()
         self.next_window.start_copy_process(
-            self.file_path, self.source_dir, self.photos_ext, self.dest_dir
+            self.file_path,
+            self.source_dir,
+            self.photos_ext,
+            self.photos_format,
+            self.dest_dir,
         )
 
 
@@ -523,26 +641,32 @@ class CopyWindow(QMainWindow):
         match outcome:
             case CopyOutcome.SUCCESS:
                 self.update_log(
-                    "<span style='color: green; font-weight: bold;'>Cópia concluída com sucesso!</span>"
+                    "\n<span style='color: green; font-weight: bold;'>Cópia concluída com sucesso!</span>"
                 )
             case CopyOutcome.FINISH_ERRORS:
                 self.update_log(
-                    "<span style='color: goldenrod; font-weight: bold;'>Cópia concluída com alguns erros!</span>"
+                    "\n<span style='color: goldenrod; font-weight: bold;'>Cópia concluída com alguns erros!</span>"
                 )
             case CopyOutcome.FAILURE:
                 self.update_log(
-                    "<span style='color: red; font-weight: bold;'>Cópia falhou!</span>"
+                    "\n<span style='color: red; font-weight: bold;'>Cópia falhou!</span>"
                 )
 
         self.done_button.setEnabled(True)
 
     def start_copy_process(
-        self, file_path: str, source_dir: str, photos_ext: str, dest_dir: str
+        self,
+        file_path: str,
+        source_dir: str,
+        photos_ext: str,
+        photos_format: str,
+        dest_dir: str,
     ) -> None:
         """
         Starts the copy process
         """
-        self.update_log("A ler ficheiro...")
+        self.__format_exists: bool = bool(photos_format)
+        self.update_log(f"A ler ficheiro {os.path.basename(file_path)}...")
         try:
             photos = self.read_file(file_path)
         except Exception as e:
@@ -552,16 +676,18 @@ class CopyWindow(QMainWindow):
             self.update_log(
                 "<span style='color: green;'>Ficheiro lido com sucesso!</span>"
             )
-            self.update_log(f"A copiar {photos.total()} fotos...")
+            self.update_log(f"\nA copiar {photos.total()} fotos...")
 
             # Initialize progress bar
             self.progress_bar.setEnabled(True)
             # self.progress_bar.setTextVisible(True)
 
             # Start the file copying process in a separate thread
-            self.copy_thread = CopyThread(source_dir, dest_dir, photos, photos_ext)
+            self.copy_thread = CopyThread(
+                source_dir, dest_dir, photos, photos_ext, photos_format
+            )
             self.copy_thread.progress.connect(self.update_progress)
-            self.copy_thread.error_log.connect(self.update_log)
+            self.copy_thread.update_log.connect(self.update_log)
             self.copy_thread.finished.connect(self.copy_finished)
             self.copy_thread.start()
 
@@ -593,7 +719,7 @@ class CopyWindow(QMainWindow):
         except OSError as e:
             raise Exception(f"Erro ao ler ficheiro: {e}")
 
-        return Counter([p_filtered for p in photos if (p_filtered := p.strip())])
+        return self.get_counter(photos)
 
     def read_excel_file(self, file_path: str) -> Counter[str]:
         """
@@ -615,7 +741,33 @@ class CopyWindow(QMainWindow):
         except (OSError, Exception) as e:
             raise Exception(f"Erro ao ler ficheiro: {e}")
 
-        return Counter([p_filtered for p in photos if (p_filtered := p.strip())])
+        return self.get_counter(photos)
+
+    def get_counter(self, photos: list[str]) -> Counter[str]:
+        """
+        Returns a Counter with the photos names filtered
+        1. Strip names
+        2. Remove empty names
+        3. If format is set, remove names that are not digits
+        4. Return a Counter with the names
+        """
+        filtered_photos: list[str] = [p_strip for p in photos if (p_strip := p.strip())]
+
+        if self.__format_exists:
+            removed_photos: list[str] = []
+            filtered_photos_copy: list[str] = filtered_photos.copy()
+            filtered_photos.clear()
+            for p in filtered_photos_copy:
+                if not p.isdigit():
+                    removed_photos.append(p)
+                else:
+                    filtered_photos.append(str(int(p)))  # Remove leading zeros
+            if removed_photos:
+                self.update_log(
+                    f"<span style='color: goldenrod;'>Aviso: Foram removidos {len(removed_photos)} nomes inválidos (não numéricos)!</span>"
+                )
+
+        return Counter(filtered_photos)
 
 
 def main() -> None:
