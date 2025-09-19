@@ -27,6 +27,6 @@ setup: windows
 # Clean up build artifacts
 clean:
 	@echo "=== Cleaning up build artifacts ==="
-	rm -rf $(BUILD_DIR) __pycache__ *.spec output
+	rm -rf $(BUILD_DIR) $(DIST_DIR) __pycache__ *.spec output
 
 .PHONY: all linux windows setup clean
