@@ -8,7 +8,15 @@ from typing import Any
 
 import pandas as pd
 import platformdirs
-from PyQt6.QtCore import QCoreApplication, QSettings, Qt, QThread, pyqtSignal
+from PyQt6.QtCore import (
+    QByteArray,
+    QCoreApplication,
+    QSettings,
+    Qt,
+    QThread,
+    pyqtSignal,
+)
+from PyQt6.QtGui import QHideEvent, QShowEvent
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -25,7 +33,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-__version__ = "1.0.6"
+__version__ = "1.0.7"
 
 
 def get_settings() -> QSettings:
@@ -380,6 +388,7 @@ class InitWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle(QCoreApplication.applicationName())
         self.setFixedSize(400, 250)
+        self.__geometry: QByteArray | None = None
 
         layout = QVBoxLayout()
         layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
@@ -420,6 +429,21 @@ class InitWindow(QMainWindow):
         widget.setLayout(layout)
         self.setCentralWidget(widget)
 
+    def showEvent(self, event: QShowEvent | None) -> None:
+        """
+        Restore window geometry
+        """
+        if self.__geometry:
+            self.restoreGeometry(self.__geometry)
+        super().showEvent(event)
+
+    def hideEvent(self, event: QHideEvent | None) -> None:
+        """
+        Save window geometry
+        """
+        self.__geometry = self.saveGeometry()
+        super().hideEvent(event)
+
     def open_file_window(self) -> None:
         """
         Goes to the file selection window
@@ -440,9 +464,10 @@ class FileSelectionWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle(QCoreApplication.applicationName())
         self.setFixedSize(600, 450)
+        self.__geometry: QByteArray | None = None
 
         self.main_window = main_window
-        self.next_window = CopyWindow()
+        self.next_window = CopyWindow(self)
 
         self.settings = get_settings()
         self.file_path: str = self.settings.value("file_path", "", type=str)
@@ -588,6 +613,21 @@ class FileSelectionWindow(QMainWindow):
         widget = QWidget()
         widget.setLayout(layout)
         self.setCentralWidget(widget)
+
+    def showEvent(self, event: QShowEvent | None) -> None:
+        """
+        Restore window geometry
+        """
+        if self.__geometry:
+            self.restoreGeometry(self.__geometry)
+        super().showEvent(event)
+
+    def hideEvent(self, event: QHideEvent | None) -> None:
+        """
+        Save window geometry
+        """
+        self.__geometry = self.saveGeometry()
+        super().hideEvent(event)
 
     def get_file_path(self) -> None:
         """
@@ -818,9 +858,10 @@ class FolderSelectionWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle(QCoreApplication.applicationName())
         self.setFixedSize(600, 250)
+        self.__geometry: QByteArray | None = None
 
         self.main_window = main_window
-        self.next_window = CopyWindow()
+        self.next_window = CopyWindow(self)
 
         self.settings = get_settings()
         self.folder_dir: str = self.settings.value("folder_dir", "", type=str)
@@ -924,6 +965,21 @@ class FolderSelectionWindow(QMainWindow):
         widget = QWidget()
         widget.setLayout(layout)
         self.setCentralWidget(widget)
+
+    def showEvent(self, event: QShowEvent | None) -> None:
+        """
+        Restore window geometry
+        """
+        if self.__geometry:
+            self.restoreGeometry(self.__geometry)
+        super().showEvent(event)
+
+    def hideEvent(self, event: QHideEvent | None) -> None:
+        """
+        Hide the window and save its geometry
+        """
+        self.__geometry = self.saveGeometry()
+        super().hideEvent(event)
 
     def get_folder_path(self) -> None:
         """
@@ -1090,10 +1146,11 @@ class FolderSelectionWindow(QMainWindow):
 
 
 class CopyWindow(QMainWindow):
-    def __init__(self) -> None:
+    def __init__(self, last_window: QMainWindow) -> None:
         super().__init__()
         self.setWindowTitle(QCoreApplication.applicationName())
         self.setFixedSize(600, 250)
+        self.__geometry: QByteArray | None = None
 
         layout = QVBoxLayout()
         layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
@@ -1109,17 +1166,44 @@ class CopyWindow(QMainWindow):
         self.log_area.setReadOnly(True)
         layout.addWidget(self.log_area)
 
+        # PREVIOUS/DONE BUTTONS
+        action_button_layout = QHBoxLayout()
+        action_button_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.last_window = last_window
+        self.back_button = MyPushButton("Voltar")
+        self.back_button.clicked.connect(self.back)
+        action_button_layout.addWidget(self.back_button)
+
         self.done_button = MyPushButton("Fechar")
         self.done_button.setEnabled(False)
         self.done_button.clicked.connect(self.close)
-        done_layout = QHBoxLayout()
-        done_layout.addWidget(self.done_button)
-        done_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addLayout(done_layout)
+        action_button_layout.addWidget(self.done_button)
+
+        layout.addLayout(action_button_layout)
 
         widget = QWidget()
         widget.setLayout(layout)
         self.setCentralWidget(widget)
+
+    def showEvent(self, event: QShowEvent | None) -> None:
+        """
+        Shows the window and resets the UI elements
+        """
+        self.progress_bar.setValue(0)
+        self.progress_bar.setEnabled(False)
+        self.log_area.clear()
+        self.done_button.setEnabled(False)
+        if self.__geometry:
+            self.restoreGeometry(self.__geometry)
+        return super().showEvent(event)
+
+    def hideEvent(self, event: QHideEvent | None) -> None:
+        """
+        Hides the window and saves its geometry
+        """
+        self.__geometry = self.saveGeometry()
+        return super().hideEvent(event)
 
     def close(self) -> bool:
         """
@@ -1128,6 +1212,13 @@ class CopyWindow(QMainWindow):
         if hasattr(self, "copy_thread"):
             self.copy_thread.terminate()
         return super().close()
+
+    def back(self) -> None:
+        """
+        Goes to the previous window
+        """
+        self.last_window.show()
+        self.close()
 
     def update_progress(self, value: int) -> None:
         """
