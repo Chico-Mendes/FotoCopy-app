@@ -25,7 +25,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-__version__ = "1.0.5"
+__version__ = "1.0.6"
 
 
 def get_settings() -> QSettings:
@@ -75,8 +75,8 @@ class CopyThread(QThread):
         source_dir: str,
         dest_dir: str,
         photos: Counter[str],
-        photos_ext: str,
-        photos_format: str,
+        photos_ext: str = "",
+        photos_format: str = "",
     ) -> None:
         super().__init__()
         self.source_dir: str = source_dir
@@ -112,7 +112,11 @@ class CopyThread(QThread):
         Copy a photo n times.
         Returns True if all copies were successful, False otherwise.
         """
-        self.update_log.emit(f"A copiar {n} fotos {photo + self.photos_ext!r}...")
+        init_msg: str = f"A copiar foto {photo + self.photos_ext!r}" + (
+            f" {n} vezes..." if n > 1 else "..."
+        )
+
+        self.update_log.emit(init_msg)
         all_copied = True
 
         src_file = os.path.join(self.source_dir, photo + self.photos_ext)
@@ -377,11 +381,9 @@ class InitWindow(QMainWindow):
         self.setWindowTitle(QCoreApplication.applicationName())
         self.setFixedSize(400, 250)
 
-        self.next_window = ChoiceWindow()
-
         layout = QVBoxLayout()
         layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        layout.addStretch(0)
+        layout.addStretch()
 
         self.label = QLabel(QCoreApplication.applicationName())
         self.label.setWordWrap(True)
@@ -398,32 +400,50 @@ class InitWindow(QMainWindow):
         font.setItalic(True)
         self.version_label.setFont(font)
         layout.addWidget(self.version_label)
-        layout.addStretch(0)
+        layout.addStretch()
 
-        self.next_button = MyPushButton("Começar")
-        self.next_button.clicked.connect(self.next)
-        layout.addWidget(self.next_button)
-        layout.addStretch(0)
+        self.info_label = MyLabel("Copiar fotos a partir de:")
+        layout.addWidget(self.info_label)
+
+        self.file_window = FileSelectionWindow(self)
+        self.file_button = MyPushButton("Ficheiro")
+        self.file_button.clicked.connect(self.open_file_window)
+        layout.addWidget(self.file_button)
+
+        self.folder_window = FolderSelectionWindow(self)
+        self.folder_button = MyPushButton("Pasta")
+        self.folder_button.clicked.connect(self.open_folder_window)
+        layout.addWidget(self.folder_button)
+        layout.addStretch()
 
         widget = QWidget()
         widget.setLayout(layout)
         self.setCentralWidget(widget)
 
-    def next(self) -> None:
+    def open_file_window(self) -> None:
         """
-        Goes to the next window
+        Goes to the file selection window
         """
+        self.file_window.show()
         self.close()
-        self.next_window.show()
+
+    def open_folder_window(self) -> None:
+        """
+        Goes to the folder selection window
+        """
+        self.folder_window.show()
+        self.close()
 
 
-class ChoiceWindow(QMainWindow):
-    def __init__(self) -> None:
+class FileSelectionWindow(QMainWindow):
+    def __init__(self, main_window: InitWindow) -> None:
         super().__init__()
         self.setWindowTitle(QCoreApplication.applicationName())
         self.setFixedSize(600, 450)
 
+        self.main_window = main_window
         self.next_window = CopyWindow()
+
         self.settings = get_settings()
         self.file_path: str = self.settings.value("file_path", "", type=str)
         self.source_dir: str = self.settings.value("source_dir", "", type=str)
@@ -526,15 +546,21 @@ class ChoiceWindow(QMainWindow):
         dest_dir_layout.setContentsMargins(10, 0, 10, 10)
         layout.addLayout(dest_dir_layout)
 
-        # NEXT
+        # WINDOWS BUTTONS
+        buttons_layout = QHBoxLayout()
+        buttons_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        buttons_layout.setContentsMargins(0, 0, 0, 10)
+
+        self.back_button = MyPushButton("Voltar")
+        self.back_button.clicked.connect(self.back)
+        buttons_layout.addWidget(self.back_button)
+
         self.next_button = MyPushButton("Próximo")
         self.next_button.setEnabled(False)
         self.next_button.clicked.connect(self.next)
-        next_layout = QHBoxLayout()
-        next_layout.addWidget(self.next_button)
-        next_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        next_layout.setContentsMargins(0, 0, 0, 10)
-        layout.addLayout(next_layout)
+        buttons_layout.addWidget(self.next_button)
+
+        layout.addLayout(buttons_layout)
 
         # Set previous values and booleans
         self.file_bool: bool = False
@@ -608,7 +634,7 @@ class ChoiceWindow(QMainWindow):
                 self.source_bool = False
                 self.source_dir = ""
                 self.source_dir_line_edit.setText(
-                    "Atenção: pasta de destino igual à pasta das fotos"
+                    "Atenção: pasta das fotos igual à pasta de destino"
                 )
                 self.source_dir_line_edit.setStyleSheet("color: red;")
             else:
@@ -745,6 +771,13 @@ class ChoiceWindow(QMainWindow):
         else:
             self.next_button.setEnabled(False)
 
+    def back(self) -> None:
+        """
+        Goes to the previous window
+        """
+        self.main_window.show()
+        self.close()
+
     def next(self) -> None:
         """
         Goes to the next window
@@ -769,13 +802,289 @@ class ChoiceWindow(QMainWindow):
                 # User chose not to delete contents or canceled or there was an error
                 return
 
-        self.close()
         self.next_window.show()
-        self.next_window.start_copy_process(
+        self.close()
+        self.next_window.start_file_copy_process(
             self.file_path,
             self.source_dir,
             self.photos_ext,
             self.photos_format,
+            self.dest_dir,
+        )
+
+
+class FolderSelectionWindow(QMainWindow):
+    def __init__(self, main_window: QMainWindow) -> None:
+        super().__init__()
+        self.setWindowTitle(QCoreApplication.applicationName())
+        self.setFixedSize(600, 250)
+
+        self.main_window = main_window
+        self.next_window = CopyWindow()
+
+        self.settings = get_settings()
+        self.folder_dir: str = self.settings.value("folder_dir", "", type=str)
+        self.source_dir: str = self.settings.value("source_dir", "", type=str)
+        self.dest_dir: str = self.settings.value("dest_dir", "", type=str)
+
+        layout = QVBoxLayout()
+
+        # FOLDER
+        self.folder_label = MyLabel("Pasta com a lista de fotos a copiar:")
+        self.folder_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom
+        )
+        layout.addWidget(self.folder_label)
+
+        self.folder_line_edit = MyLineEdit("Selecionar pasta...")
+        self.folder_line_edit.textChanged.connect(self.content_changed)
+        self.folder_button = MyPushButton("Selecionar")
+        self.folder_button.clicked.connect(self.get_folder_path)
+        folder_layout = QHBoxLayout()
+        folder_layout.addWidget(self.folder_line_edit)
+        folder_layout.addWidget(self.folder_button)
+        folder_layout.setContentsMargins(10, 0, 10, 10)
+        layout.addLayout(folder_layout)
+
+        # PHOTOS DIR
+        self.source_dir_label = MyLabel("Pasta com as fotos:")
+        self.source_dir_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom
+        )
+        layout.addWidget(self.source_dir_label)
+
+        self.source_dir_line_edit = MyLineEdit("Selecionar pasta...")
+        self.source_dir_line_edit.textChanged.connect(self.content_changed)
+        self.source_dir_button = MyPushButton("Selecionar")
+        self.source_dir_button.clicked.connect(self.get_source_dir)
+        source_dir_layout = QHBoxLayout()
+        source_dir_layout.addWidget(self.source_dir_line_edit)
+        source_dir_layout.addWidget(self.source_dir_button)
+        source_dir_layout.setContentsMargins(10, 0, 10, 10)
+        layout.addLayout(source_dir_layout)
+
+        # OUTPUT DIR
+        self.dest_dir_label = MyLabel("Pasta de destino:")
+        self.dest_dir_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom
+        )
+        layout.addWidget(self.dest_dir_label)
+
+        self.dest_dir_line_edit = MyLineEdit("Selecionar pasta...")
+        self.dest_dir_line_edit.textChanged.connect(self.content_changed)
+        self.dest_dir_button = MyPushButton("Selecionar")
+        self.dest_dir_button.clicked.connect(self.get_dest_dir)
+        dest_dir_layout = QHBoxLayout()
+        dest_dir_layout.addWidget(self.dest_dir_line_edit)
+        dest_dir_layout.addWidget(self.dest_dir_button)
+        dest_dir_layout.setContentsMargins(10, 0, 10, 10)
+        layout.addLayout(dest_dir_layout)
+
+        # WINDOWS BUTTONS
+        buttons_layout = QHBoxLayout()
+        buttons_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        buttons_layout.setContentsMargins(0, 0, 0, 10)
+
+        self.back_button = MyPushButton("Voltar")
+        self.back_button.clicked.connect(self.back)
+        buttons_layout.addWidget(self.back_button)
+
+        self.next_button = MyPushButton("Próximo")
+        self.next_button.clicked.connect(self.next)
+        self.next_button.setEnabled(False)
+        buttons_layout.addWidget(self.next_button)
+
+        layout.addLayout(buttons_layout)
+
+        # Set previous values and booleans
+        self.folder_bool: bool = False
+        self.source_bool: bool = False
+        self.dest_bool: bool = False
+
+        if self.folder_dir:
+            self.folder_bool = True
+            self.folder_line_edit.setText(self.folder_dir)
+
+        if self.source_dir and self.source_dir != self.folder_dir:
+            self.source_bool = True
+            self.source_dir_line_edit.setText(self.source_dir)
+        elif self.source_dir == self.folder_dir:
+            self.source_dir = ""
+
+        if (
+            self.dest_dir
+            and self.dest_dir != self.folder_dir
+            and self.dest_dir != self.source_dir
+        ):
+            self.dest_bool = True
+            self.dest_dir_line_edit.setText(self.dest_dir)
+        elif self.dest_dir == self.folder_dir or self.dest_dir == self.source_dir:
+            self.dest_dir = ""
+
+        widget = QWidget()
+        widget.setLayout(layout)
+        self.setCentralWidget(widget)
+
+    def get_folder_path(self) -> None:
+        """
+        Returns the path of the folder selected by the user
+        """
+        if not self.folder_dir and not hasattr(self, "initial_path"):
+            self.initial_path: str = platformdirs.user_desktop_dir()
+        else:
+            self.initial_path = self.folder_dir
+
+        folder_dir = QFileDialog.getExistingDirectory(
+            caption="Selecionar pasta com a lista de fotos a copiar",
+            directory=self.initial_path,
+            options=QFileDialog.Option.HideNameFilterDetails,
+        )
+
+        if folder_dir:
+            if folder_dir == self.source_dir:
+                self.folder_bool = False
+                self.folder_dir = ""
+                self.folder_line_edit.setText(
+                    "Atenção: pasta da lista das fotos igual à pasta das fotos"
+                )
+                self.folder_line_edit.setStyleSheet("color: red;")
+            elif folder_dir == self.dest_dir:
+                self.folder_bool = False
+                self.folder_dir = ""
+                self.folder_line_edit.setText(
+                    "Atenção: pasta da lista das fotos igual à pasta de destino"
+                )
+                self.folder_line_edit.setStyleSheet("color: red;")
+            else:
+                self.folder_bool = True
+                self.folder_dir = folder_dir
+                self.folder_line_edit.setText(folder_dir)
+                self.folder_line_edit.setStyleSheet("color: black;")
+                self.initial_path = folder_dir
+        elif not self.folder_dir:
+            self.folder_bool = False
+            self.folder_line_edit.setText("Pasta não selecionada")
+
+    def get_source_dir(self) -> None:
+        """
+        Returns the path of the photos directory selected by the user
+        """
+        if not self.source_dir and not hasattr(self, "initial_path"):
+            self.initial_path = platformdirs.user_desktop_dir()
+        else:
+            self.initial_path = self.source_dir
+
+            source_dir = QFileDialog.getExistingDirectory(
+                caption="Selecionar pasta com as fotos",
+                directory=self.initial_path,
+                options=QFileDialog.Option.HideNameFilterDetails,
+            )
+
+        if source_dir:
+            if source_dir == self.folder_dir:
+                self.source_bool = False
+                self.source_dir = ""
+                self.source_dir_line_edit.setText(
+                    "Atenção: pasta das fotos igual à pasta da lista das fotos"
+                )
+                self.source_dir_line_edit.setStyleSheet("color: red;")
+            elif source_dir == self.dest_dir:
+                self.source_bool = False
+                self.source_dir = ""
+                self.source_dir_line_edit.setText(
+                    "Atenção: pasta das fotos igual à pasta de destino"
+                )
+                self.source_dir_line_edit.setStyleSheet("color: red;")
+            else:
+                self.source_bool = True
+                self.source_dir = source_dir
+                self.source_dir_line_edit.setText(source_dir)
+                self.source_dir_line_edit.setStyleSheet("color: black;")
+                self.initial_path = source_dir
+        elif not self.source_dir:
+            self.source_bool = False
+            self.source_dir_line_edit.setText("Pasta não selecionada")
+
+    def get_dest_dir(self) -> None:
+        """
+        Returns the path of the output directory selected by the user
+        """
+        if not self.dest_dir and not hasattr(self, "initial_path"):
+            self.initial_path = platformdirs.user_desktop_dir()
+        else:
+            self.initial_path = self.dest_dir
+
+        dest_dir = QFileDialog.getExistingDirectory(
+            caption="Selecionar pasta de destino para as fotos",
+            directory=self.initial_path,
+            options=QFileDialog.Option.HideNameFilterDetails,
+        )
+
+        if dest_dir:
+            if dest_dir == self.source_dir:
+                self.dest_bool = False
+                self.dest_dir = ""
+                self.dest_dir_line_edit.setText(
+                    "Atenção: pasta de destino igual à pasta das fotos"
+                )
+                self.dest_dir_line_edit.setStyleSheet("color: red;")
+            elif dest_dir == self.folder_dir:
+                self.dest_bool = False
+                self.dest_dir = ""
+                self.dest_dir_line_edit.setText(
+                    "Atenção: pasta de destino igual à pasta da lista das fotos"
+                )
+                self.dest_dir_line_edit.setStyleSheet("color: red;")
+            else:
+                self.dest_bool = True
+                self.dest_dir = dest_dir
+                self.dest_dir_line_edit.setText(dest_dir)
+                self.dest_dir_line_edit.setStyleSheet("color: black;")
+                self.initial_path = dest_dir
+        elif not self.dest_dir:
+            self.dest_bool = False
+            self.dest_dir_line_edit.setText("Pasta não selecionada")
+
+    def content_changed(self) -> None:
+        """
+        Checks if the content of the widgets is valid to enable the next button
+        """
+        if self.folder_dir and self.source_dir and self.dest_dir:
+            self.next_button.setEnabled(True)
+        else:
+            self.next_button.setEnabled(False)
+
+    def back(self) -> None:
+        """
+        Goes to the previous window
+        """
+        self.main_window.show()
+        self.close()
+
+    def next(self) -> None:
+        """
+        Goes to the next window
+        """
+        if not self.folder_dir or not self.source_dir or not self.dest_dir:
+            return
+        else:
+            self.settings.setValue("folder_dir", self.folder_dir)
+            self.settings.setValue("source_dir", self.source_dir)
+            self.settings.setValue("dest_dir", self.dest_dir)
+
+        # Check if dest_dir is empty
+        if os.listdir(self.dest_dir):
+            dialog = DeleteFolderDialog(self.dest_dir)
+            dialog.exec()
+            if not dialog.user_choice:
+                # User chose not to delete contents or canceled or there was an error
+                return
+
+        self.next_window.show()
+        self.close()
+        self.next_window.start_folder_copy_process(
+            self.folder_dir,
+            self.source_dir,
             self.dest_dir,
         )
 
@@ -852,7 +1161,7 @@ class CopyWindow(QMainWindow):
 
         self.done_button.setEnabled(True)
 
-    def start_copy_process(
+    def start_file_copy_process(
         self,
         file_path: str,
         source_dir: str,
@@ -884,6 +1193,39 @@ class CopyWindow(QMainWindow):
             self.copy_thread = CopyThread(
                 source_dir, dest_dir, photos, photos_ext, photos_format
             )
+            self.copy_thread.progress.connect(self.update_progress)
+            self.copy_thread.update_log.connect(self.update_log)
+            self.copy_thread.finished.connect(self.copy_finished)
+            self.copy_thread.start()
+
+    def start_folder_copy_process(
+        self,
+        folder_dir: str,
+        source_dir: str,
+        dest_dir: str,
+    ) -> None:
+        """
+        Starts the copy process
+        """
+        self.__format_exists = False
+        self.update_log(f"A ler pasta {os.path.basename(folder_dir)}...")
+        try:
+            photos = self.read_folder(folder_dir)
+        except Exception as e:
+            self.update_log(str(e))
+            self.copy_finished(CopyOutcome.FAILURE)
+        else:
+            self.update_log(
+                "<span style='color: green;'>Pasta lida com sucesso!</span>"
+            )
+            self.update_log(f"\nA copiar {photos.total()} fotos...")
+
+            # Initialize progress bar
+            self.progress_bar.setEnabled(True)
+            # self.progress_bar.setTextVisible(True)
+
+            # Start the file copying process in a separate thread
+            self.copy_thread = CopyThread(source_dir, dest_dir, photos)
             self.copy_thread.progress.connect(self.update_progress)
             self.copy_thread.update_log.connect(self.update_log)
             self.copy_thread.finished.connect(self.copy_finished)
@@ -938,6 +1280,21 @@ class CopyWindow(QMainWindow):
             raise Exception(f"Erro no conteúdo do ficheiro: {e}")
         except (OSError, Exception) as e:
             raise Exception(f"Erro ao ler ficheiro: {e}")
+
+        return self.get_counter(photos)
+
+    def read_folder(self, folder_path: str) -> Counter[str]:
+        """
+        Reads the folder and returns a Counter with the photos names
+        """
+        try:
+            photos: list[str] = os.listdir(folder_path)
+        except FileNotFoundError:
+            raise Exception("Pasta não existe!")
+        except PermissionError:
+            raise Exception("Permissão negada para aceder à pasta!")
+        except OSError as e:
+            raise Exception(f"Erro ao ler pasta: {e}")
 
         return self.get_counter(photos)
 
