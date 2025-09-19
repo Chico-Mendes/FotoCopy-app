@@ -1,15 +1,15 @@
 #define appName "FotoCopy"
-#define appVersion "1.0.0"
-#define sourceFile "copy-files-app.exe"
+#define appVersion "1.1.7"
+#define sourceFile "dist/copy-files-app.exe"
 
 [Setup]
-;AppId={{08203CFF-8664-4C29-AE3C-0BC1256C8F7D}
+AppId={{08203CFF-8664-4C29-AE3C-0BC1256C8F7D}}
 AppName={#appName}
 AppVersion={#appVersion}
 WizardStyle=modern
 DefaultDirName={autopf}\{#appName}
 DefaultGroupName={#appName}
-OutputDir=.
+OutputDir=dist
 OutputBaseFilename={#appName}_setup
 Compression=lzma
 SolidCompression=yes

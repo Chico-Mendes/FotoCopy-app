@@ -33,7 +33,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-__version__ = "1.0.7"
+__version__ = "1.1.7"
 
 
 def get_settings() -> QSettings:
