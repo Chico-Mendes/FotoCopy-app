@@ -12,6 +12,7 @@ from PyQt6.QtCore import QCoreApplication, QSettings, Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
+    QDialog,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -24,7 +25,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-__version__ = "1.0.4"
+__version__ = "1.0.5"
 
 
 def get_settings() -> QSettings:
@@ -56,6 +57,12 @@ class CopyOutcome(Enum):
     SUCCESS = 1
     FINISH_ERRORS = 2
     FAILURE = 3
+
+
+class DeleteOutcome(Enum):
+    SUCCESS = 1
+    FAILURE = 2
+    CANCELED = 3
 
 
 class CopyThread(QThread):
@@ -107,12 +114,13 @@ class CopyThread(QThread):
         """
         self.update_log.emit(f"A copiar {n} fotos {photo + self.photos_ext!r}...")
         all_copied = True
+
+        src_file = os.path.join(self.source_dir, photo + self.photos_ext)
         for k in range(1, n + 1):
             out_photo: str = photo
             if n > 1:
                 out_photo += f" ({k})"
 
-            src_file = os.path.join(self.source_dir, photo + self.photos_ext)
             dest_file = os.path.join(self.dest_dir, out_photo + self.photos_ext)
             try:
                 shutil.copyfile(src_file, dest_file)
@@ -140,6 +148,55 @@ class CopyThread(QThread):
                 )
 
         return all_copied
+
+
+class DeleteThread(QThread):
+    finished = pyqtSignal(DeleteOutcome)
+    update_log = pyqtSignal(str)
+
+    def __init__(self, folder_path: str) -> None:
+        super().__init__()
+        self.folder_path: str = folder_path
+        self.__canceled: bool = False
+
+    def run(self) -> None:
+        outcome: DeleteOutcome = DeleteOutcome.SUCCESS
+        for root, dirs, files in os.walk(self.folder_path, topdown=False):
+            for f in files:
+                if self.__canceled:
+                    self.finished.emit(DeleteOutcome.CANCELED)
+                    return
+                path = os.path.join(root, f)
+                self.update_log.emit(f"A apagar {path!r}...")
+                try:
+                    os.remove(path)
+                except Exception as e:
+                    self.update_log.emit(
+                        f"<span style='color: red;'>Erro ao apagar {path!r}: {e}</span>"
+                    )
+                    outcome = DeleteOutcome.FAILURE
+            for d in dirs:
+                if self.__canceled:
+                    self.finished.emit(DeleteOutcome.CANCELED)
+                    return
+                path = os.path.join(root, d)
+                self.update_log.emit(f"A apagar {path!r}...")
+                try:
+                    os.rmdir(path)
+                except Exception as e:
+                    self.update_log.emit(
+                        f"<span style='color: red;'>Erro ao apagar {path!r}: {e}</span>"
+                    )
+                    outcome = DeleteOutcome.FAILURE
+
+        os.makedirs(self.folder_path, exist_ok=True)
+        self.finished.emit(outcome)
+
+    def cancel(self) -> None:
+        """
+        Cancel the deletion process
+        """
+        self.__canceled = True
 
 
 class MyLabel(QLabel):
@@ -179,6 +236,139 @@ class MyComboBox(QComboBox):
         font = self.font()
         font.setPointSize(12)
         self.setFont(font)
+
+
+class DeleteFolderDialog(QDialog):
+    def __init__(self, folder_path: str) -> None:
+        super().__init__()
+        self.setWindowTitle(QCoreApplication.applicationName())
+        self.setFixedSize(400, 200)
+
+        self.folder_path: str = folder_path
+        self.user_choice: bool = False
+
+        layout = QVBoxLayout()
+        layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        layout.addStretch(0)
+        self.label = QLabel(
+            f"A pasta de destino {os.path.basename(folder_path)!r} não está vazia.\n"
+            "Apgagar o conteúdo existente e continuar?"
+        )
+        self.label.setWordWrap(True)
+        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Increase font size
+        font = self.label.font()
+        font.setPointSize(12)
+        self.label.setFont(font)
+        layout.addWidget(self.label)
+        layout.addStretch(0)
+
+        self.yes_button = MyPushButton("Sim")
+        self.yes_button.clicked.connect(self.yes)
+        self.no_button = MyPushButton("Não")
+        self.no_button.clicked.connect(self.no)
+        buttons_layout = QHBoxLayout()
+        buttons_layout.addWidget(self.no_button)
+        buttons_layout.addWidget(self.yes_button)
+        layout.addLayout(buttons_layout)
+        layout.addStretch(0)
+
+        self.setLayout(layout)
+
+        self.yes_button.setFocus()
+
+    def yes(self) -> None:
+        """
+        User chose to delete the folder contents
+        """
+        self.user_choice = True
+        # Delete folder contents
+        # Show progress dialog
+        progress_dialog = self.ProgressDialog(self.folder_path, self)
+        progress_dialog.accepted.connect(self.close)  # Close this dialog when done
+        progress_dialog.rejected.connect(self.no)  # Treat cancel/failure as "No"
+        progress_dialog.start()
+
+    def no(self) -> None:
+        """
+        User chose not to delete the folder contents
+        """
+        self.user_choice = False
+        self.close()
+
+    class ProgressDialog(QDialog):
+        def __init__(self, folder_path: str, parent: QWidget) -> None:
+            super().__init__(parent)
+            self.setWindowTitle(QCoreApplication.applicationName())
+            self.setWindowModality(Qt.WindowModality.ApplicationModal)
+            self.setFixedSize(300, 100)
+
+            layout = QVBoxLayout()
+            layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+            layout.addStretch(1)
+
+            self.label = MyLabel(
+                f"A apagar o conteúdo de {os.path.basename(folder_path)!r}..."
+            )
+            layout.addWidget(self.label)
+            layout.addStretch(1)
+
+            self.progress_bar = QProgressBar()
+            self.progress_bar.setRange(0, 0)  # Indeterminate progress
+            layout.addWidget(self.progress_bar)
+            layout.addStretch(1)
+
+            self.cancel_button = MyPushButton("Cancelar")
+            self.cancel_button.clicked.connect(self.cancel)
+            layout.addWidget(self.cancel_button)
+            layout.addStretch(1)
+
+            self.setLayout(layout)
+
+            self.deleteThread = DeleteThread(folder_path)
+            self.deleteThread.finished.connect(self.handle_finished)
+            self.deleteThread.update_log.connect(self.label.setText)
+
+        def cancel(self) -> None:
+            """
+            User chose to cancel the deletion
+            """
+            if self.deleteThread.isRunning():
+                self.deleteThread.cancel()
+
+        def start(self) -> None:
+            """
+            Show the dialog and start the deletion thread
+            """
+            super().show()
+            self.deleteThread.start()
+
+        def handle_finished(self, success: DeleteOutcome) -> None:
+            """
+            Handle the completion of the deletion process
+            """
+            if success == DeleteOutcome.FAILURE:
+                error_dialog = QDialog(self)
+                error_dialog.setWindowTitle("Erro")
+                error_dialog.setFixedSize(300, 100)
+                error_layout = QVBoxLayout()
+                error_label = QLabel("Ocorreu um erro ao apagar alguns ficheiros.")
+                error_label.setWordWrap(True)
+                error_layout.addWidget(error_label)
+                ok_button = MyPushButton("OK")
+                ok_button.clicked.connect(error_dialog.close)
+                button_layout = QHBoxLayout()
+                button_layout.addStretch(1)
+                button_layout.addWidget(ok_button)
+                button_layout.addStretch(1)
+                error_layout.addLayout(button_layout)
+                error_dialog.setLayout(error_layout)
+                error_dialog.exec()
+                self.reject()
+            elif success == DeleteOutcome.CANCELED:
+                self.reject()
+            else:
+                self.accept()
 
 
 class InitWindow(QMainWindow):
@@ -570,6 +760,14 @@ class ChoiceWindow(QMainWindow):
         self.photos_ext: str = self.photos_ext_combo.currentText()
         if self.photos_ext == "Outra...":
             self.photos_ext = self.photos_ext_edit.text().strip()
+
+        # Check if dest_dir is empty
+        if os.listdir(self.dest_dir):
+            dialog = DeleteFolderDialog(self.dest_dir)
+            dialog.exec()
+            if not dialog.user_choice:
+                # User chose not to delete contents or canceled or there was an error
+                return
 
         self.close()
         self.next_window.show()
