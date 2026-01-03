@@ -34,7 +34,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-__version__ = "1.1.10"
+__version__ = "1.1.11"
 
 
 def get_settings() -> QSettings:
@@ -83,32 +83,30 @@ class CopyThread(QThread):
         self,
         source_dir: str,
         dest_dir: str,
-        photos: Counter[str],
+        photos: dict[str, Counter[str]],
         photos_ext: str = "",
         photos_format: str = "",
     ) -> None:
         super().__init__()
         self.source_dir: str = source_dir
         self.dest_dir: str = dest_dir
-        self.photos: Counter[str] = photos
+        self.photos: dict[str, Counter[str]] = photos
         self.photos_ext: str = photos_ext
         self.photos_format: str = photos_format
-        self.__total_photos: int = photos.total()
+        self.__total_photos: int = sum(p.total() for p in photos.values())
         self.__copied_photos: int = 0
 
     def run(self) -> None:
+        self.update_log.emit(f"\nA copiar {self.__total_photos} fotos...")
         errors: bool = False
-        if not self.photos_format:
-            # Copy photos using the names in the file
-            for photo, count in self.photos.items():
-                if not self.copy_n_photos(photo, count):
-                    errors = True
-        else:
-            for photo, count in self.photos.items():
-                formatted_name = get_formatted_photo_name(
-                    self.photos_format, int(photo)
-                )
-                if not self.copy_n_photos(formatted_name, count):
+        for subdir, counter in self.photos.items():
+            if subdir:
+                self.update_log.emit(f"\n--- Na pasta {subdir!r}:")
+            for photo, count in counter.items():
+                if self.photos_format:
+                    # Format photo names
+                    photo = get_formatted_photo_name(self.photos_format, int(photo))
+                if not self.copy_n_photos(photo, count, subdir):
                     errors = True
 
         if errors:
@@ -116,7 +114,7 @@ class CopyThread(QThread):
         else:
             self.finished.emit(CopyOutcome.SUCCESS)
 
-    def copy_n_photos(self, photo: str, n: int) -> bool:
+    def copy_n_photos(self, photo: str, n: int, subdir: str) -> bool:
         """
         Copy a photo n times.
         Returns True if all copies were successful, False otherwise.
@@ -124,17 +122,28 @@ class CopyThread(QThread):
         init_msg: str = f"A copiar foto {photo + self.photos_ext!r}" + (
             f" {n} vezes..." if n > 1 else "..."
         )
-
         self.update_log.emit(init_msg)
-        all_copied = True
 
+        dest_path = os.path.join(self.dest_dir, subdir)
+        try:
+            os.makedirs(dest_path, exist_ok=True)
+        except OSError as e:
+            self.update_log.emit(
+                f"<span style='color: red;'>Erro ao criar pasta {dest_path!r}: {e}</span>"
+            )
+            self.__copied_photos += n
+            # Emit progress signal
+            self.progress.emit(int(self.__copied_photos / self.__total_photos * 100))
+            return False
+
+        all_copied = True
         src_file = os.path.join(self.source_dir, photo + self.photos_ext)
         for k in range(1, n + 1):
             out_photo: str = photo
             if n > 1:
                 out_photo += f" ({k})"
 
-            dest_file = os.path.join(self.dest_dir, out_photo + self.photos_ext)
+            dest_file = os.path.join(self.dest_dir, subdir, out_photo + self.photos_ext)
             try:
                 shutil.copyfile(src_file, dest_file)
                 self.__copied_photos += 1
@@ -506,11 +515,10 @@ class FileSelectionWindow(QMainWindow):
 
         # HEADERS?
         self.headers_checkbox = MyCheckBox(
-            "O ficheiro contém cabeçalhos (nomes das colunas)"
+            "O ficheiro contém cabeçalhos (vários pedidos)"
         )
         self.headers_checkbox.stateChanged.connect(self.on_headers_checkbox_change)
         self.headers_checkbox.setChecked(False)
-        self.headers_checkbox.setVisible(False)  # Hidden for now
         headers_layout = QVBoxLayout()
         headers_layout.addWidget(self.headers_checkbox)
         headers_layout.setContentsMargins(10, 0, 10, 10)
@@ -620,8 +628,10 @@ class FileSelectionWindow(QMainWindow):
         if self.file_path:
             self.file_bool = True
             self.file_line_edit.setText(self.file_path)
-            if not self.file_path.endswith(".txt"):
-                self.headers_checkbox.setVisible(True)
+            if self.file_path.endswith(".txt"):
+                self.headers_checkbox.setVisible(False)
+        else:
+            self.headers_checkbox.setVisible(False)
 
         if self.source_dir:
             self.source_bool = True
@@ -1323,7 +1333,6 @@ class CopyWindow(QMainWindow):
             self.update_log(
                 "<span style='color: green;'>Ficheiro lido com sucesso!</span>"
             )
-            self.update_log(f"\nA copiar {photos.total()} fotos...")
 
             # Initialize progress bar
             self.progress_bar.setEnabled(True)
@@ -1358,7 +1367,6 @@ class CopyWindow(QMainWindow):
             self.update_log(
                 "<span style='color: green;'>Pasta lida com sucesso!</span>"
             )
-            self.update_log(f"\nA copiar {photos.total()} fotos...")
 
             # Initialize progress bar
             self.progress_bar.setEnabled(True)
@@ -1371,7 +1379,7 @@ class CopyWindow(QMainWindow):
             self.copy_thread.finished.connect(self.copy_finished)
             self.copy_thread.start()
 
-    def read_file(self, file_path: str, headers: bool) -> Counter[str]:
+    def read_file(self, file_path: str, headers: bool) -> dict[str, Counter[str]]:
         """
         Reads the file and returns a Counter with the photos names
         """
@@ -1387,7 +1395,7 @@ class CopyWindow(QMainWindow):
         except Exception:
             raise
 
-    def read_txt_file(self, file_path: str) -> Counter[str]:
+    def read_txt_file(self, file_path: str) -> dict[str, Counter[str]]:
         """
         Reads the TXT file and returns a list with the photos names
         """
@@ -1401,34 +1409,52 @@ class CopyWindow(QMainWindow):
         except OSError as e:
             raise Exception(f"Erro ao ler ficheiro: {e}")
 
-        return self.get_counter(photos)
+        return {"": self.get_counter(photos)}
 
-    def read_excel_file(self, file_path: str, headers: bool) -> Counter[str]:
+    def read_excel_file(self, file_path: str, headers: bool) -> dict[str, Counter[str]]:
         """
         Reads the Excel file and returns a list with the photos names
         """
-        if headers:
-            header = 0
-        else:
-            header = None
+        retval: dict[str, Counter[str]] = {}
         try:
-            if file_path.endswith(".ods"):
-                df = pd.read_excel(
-                    file_path,
-                    engine="odf",
-                    dtype=str,
-                    keep_default_na=False,
-                    header=header,
-                )
+            if headers:
+                # Pass headers as subdirectories
+                if file_path.endswith(".ods"):
+                    df = pd.read_excel(
+                        file_path,
+                        engine="odf",
+                        dtype=str,
+                        keep_default_na=False,
+                    )
+                else:
+                    df = pd.read_excel(file_path, dtype=str, keep_default_na=False)
+                # Get columns names
+                columns: list[Any] = df.columns.to_list()
+                for col in columns:
+                    retval[str(col)] = self.get_counter(df[col].to_list())
             else:
-                df = pd.read_excel(
-                    file_path, dtype=str, keep_default_na=False, header=header
-                )
-            # Get columns names
-            columns: list[Any] = df.columns.to_list()
-            photos: list[str] = []
-            for col in columns:
-                photos.extend(df[col].to_list())
+                # No headers, pass subdirectory as ""
+                if file_path.endswith(".ods"):
+                    df = pd.read_excel(
+                        file_path,
+                        engine="odf",
+                        dtype=str,
+                        keep_default_na=False,
+                        header=None,
+                    )
+                else:
+                    df = pd.read_excel(
+                        file_path,
+                        dtype=str,
+                        keep_default_na=False,
+                        header=None,
+                    )
+                # Get columns names
+                columns = df.columns.to_list()
+                photos: list[str] = []
+                for col in columns:
+                    photos.extend(df[col].to_list())
+                retval[""] = self.get_counter(photos)
         except FileNotFoundError:
             raise Exception("Ficheiro não existe!")
         except UnicodeDecodeError as e:
@@ -1436,23 +1462,32 @@ class CopyWindow(QMainWindow):
         except (OSError, Exception) as e:
             raise Exception(f"Erro ao ler ficheiro: {e}")
 
-        return self.get_counter(photos)
+        return retval
 
-    def read_csv_file(self, file_path: str, headers: bool) -> Counter[str]:
+    def read_csv_file(self, file_path: str, headers: bool) -> dict[str, Counter[str]]:
         """
         Reads the CSV file and returns a list with the photos names
         """
-        if headers:
-            header = 0
-        else:
-            header = None
+        retval: dict[str, Counter[str]] = {}
         try:
-            df = pd.read_csv(file_path, dtype=str, keep_default_na=False, header=header)
-            # Get columns names
-            columns: list[Any] = df.columns.to_list()
-            photos: list[str] = []
-            for col in columns:
-                photos.extend(df[col].to_list())
+            if headers:
+                # Pass headers as subdirectories
+                df = pd.read_csv(file_path, dtype=str, keep_default_na=False)
+                # Get columns names
+                columns: list[Any] = df.columns.to_list()
+                for col in columns:
+                    retval[str(col)] = self.get_counter(df[col].to_list())
+            else:
+                # No headers, pass subdirectory as ""
+                df = pd.read_csv(
+                    file_path, dtype=str, keep_default_na=False, header=None
+                )
+                # Get columns names
+                columns = df.columns.to_list()
+                photos: list[str] = []
+                for col in columns:
+                    photos.extend(df[col].to_list())
+                retval[""] = self.get_counter(photos)
         except FileNotFoundError:
             raise Exception("Ficheiro não existe!")
         except UnicodeDecodeError as e:
@@ -1460,9 +1495,9 @@ class CopyWindow(QMainWindow):
         except (OSError, Exception) as e:
             raise Exception(f"Erro ao ler ficheiro: {e}")
 
-        return self.get_counter(photos)
+        return retval
 
-    def read_folder(self, folder_path: str) -> Counter[str]:
+    def read_folder(self, folder_path: str) -> dict[str, Counter[str]]:
         """
         Reads the folder and returns a Counter with the photos names
         """
@@ -1475,7 +1510,7 @@ class CopyWindow(QMainWindow):
         except OSError as e:
             raise Exception(f"Erro ao ler pasta: {e}")
 
-        return self.get_counter(photos)
+        return {"": self.get_counter(photos)}
 
     def get_counter(self, photos: list[str]) -> Counter[str]:
         """
