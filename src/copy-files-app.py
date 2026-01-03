@@ -34,7 +34,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-__version__ = "1.1.11"
+__version__ = "1.1.12"
 
 
 def get_settings() -> QSettings:
@@ -100,7 +100,7 @@ class CopyThread(QThread):
         self.update_log.emit(f"\nA copiar {self.__total_photos} fotos...")
         errors: bool = False
         for subdir, counter in self.photos.items():
-            if subdir:
+            if subdir and counter:
                 self.update_log.emit(f"\n--- Na pasta {subdir!r}:")
             for photo, count in counter.items():
                 if self.photos_format:
