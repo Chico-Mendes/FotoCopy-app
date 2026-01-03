@@ -23,15 +23,38 @@ Before starting, ensure you have:
 
   ```bash
   pip install pyinstaller
+  ```
+
+  ```bash
   sudo apt install wine mingw-w64
   ```
 
-For **Inno Setup**, you’ll need to install the Windows Inno compiler in Wine:
+- For **Inno Setup**, you’ll need to install the Windows Inno compiler in Wine:
 
-```bash
-wget https://jrsoftware.org/download.php/is.exe
-wine is.exe
-```
+  ```bash
+  wget https://jrsoftware.org/download.php/is.exe
+  wine is.exe
+  ```
+
+- Use same **Python** version as Linux.
+
+  ```bash
+  wget https://www.python.org/ftp/python/3.12.3/python-3.12.3-amd64.exe
+  wine python-3.12.3-amd64.exe
+  ```
+
+  **Installer options (IMPORTANT)**
+
+  - Add Python to PATH
+  - Install for all users
+  - Default location is fine
+
+- Install **PyInstaller** (inside Wine)
+
+  ```bash
+  wine python.exe -m pip install --upgrade pip
+  wine pip install pyinstaller
+  ```
 
 ---
 
