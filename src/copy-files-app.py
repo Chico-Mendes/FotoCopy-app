@@ -34,7 +34,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-__version__ = "1.1.9"
+__version__ = "1.1.10"
 
 
 def get_settings() -> QSettings:
@@ -563,7 +563,7 @@ class FileSelectionWindow(QMainWindow):
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom
         )
         layout.addWidget(self.photos_format_label)
-        self.photos_format_line_edit = MyLineEdit("", readOnly=False)
+        self.photos_format_line_edit = MyLineEdit("?", readOnly=False)
         self.photos_format_line_edit.setFixedWidth(250)
         self.photos_format_example = MyLabel("", 10)
         self.photos_format_line_edit.textChanged.connect(self.on_photos_format_change)
