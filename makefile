@@ -4,7 +4,7 @@ MAIN_FILE = src/copy-files-app.py
 DIST_DIR = dist
 BUILD_DIR = build
 INNO_SCRIPT = setup.iss
-INNO_COMPILER = C:\\Inno Setup 6\\ISCC.exe
+INNO_COMPILER = C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe
 
 # Default target
 all: linux windows setup

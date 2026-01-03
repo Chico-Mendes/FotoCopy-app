@@ -34,7 +34,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-__version__ = "1.1.12"
+__version__ = "1.2.12"
 
 
 def get_settings() -> QSettings:
