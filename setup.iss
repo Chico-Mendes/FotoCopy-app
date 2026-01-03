@@ -1,5 +1,5 @@
 #define appName "FotoCopy"
-#define appVersion "1.1.7"
+#define appVersion "1.2.12"
 #define sourceFile "dist/copy-files-app.exe"
 
 [Setup]
