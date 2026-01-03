@@ -33,7 +33,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-__version__ = "1.1.7"
+__version__ = "1.1.8"
 
 
 def get_settings() -> QSettings:
@@ -641,8 +641,10 @@ class FileSelectionWindow(QMainWindow):
         file_path, _ = QFileDialog.getOpenFileName(
             caption="Selecionar ficheiro com lista de fotos a copiar",
             directory=self.initial_path,
-            filter="Documento de texto (*.txt);;Ficheiro Excel (*.xls *.xlsx)",
-            initialFilter="Ficheiro Excel (*.xls *.xlsx)",
+            filter="Documento de texto (*.txt);;"
+            "Ficheiro de folha de cálculo (*.xls *.xlsx *.xlsm *.ods);;"
+            "CSV (*.csv)",
+            initialFilter="Ficheiro de folha de cálculo (*.xls *.xlsx *.xlsm *.ods)",
         )
 
         if file_path:
@@ -1329,8 +1331,10 @@ class CopyWindow(QMainWindow):
         try:
             if file_path.endswith(".txt"):
                 return self.read_txt_file(file_path)
-            elif file_path.endswith(".xls") or file_path.endswith(".xlsx"):
+            elif file_path.endswith((".xls", ".xlsx", ".xlsm", ".ods")):
                 return self.read_excel_file(file_path)
+            elif file_path.endswith(".csv"):
+                return self.read_csv_file(file_path)
             else:
                 raise Exception("Oops! Formato de ficheiro não suportado!")
         except Exception:
@@ -1357,7 +1361,12 @@ class CopyWindow(QMainWindow):
         Reads the Excel file and returns a list with the photos names
         """
         try:
-            df = pd.read_excel(file_path, dtype=str, keep_default_na=False)
+            if file_path.endswith(".ods"):
+                df = pd.read_excel(
+                    file_path, engine="odf", dtype=str, keep_default_na=False
+                )
+            else:
+                df = pd.read_excel(file_path, dtype=str, keep_default_na=False)
             # Get columns names
             columns: list[Any] = df.columns.to_list()
             photos: list[str] = []
@@ -1373,6 +1382,31 @@ class CopyWindow(QMainWindow):
             raise Exception(f"Erro ao ler ficheiro: {e}")
 
         return self.get_counter(photos)
+
+    def read_csv_file(self, file_path: str) -> Counter[str]:
+        """
+        Reads the CSV file and returns a list with the photos names
+        """
+        try:
+            df = pd.read_csv(file_path, dtype=str, keep_default_na=False)
+            # Get columns names
+            columns: list[Any] = df.columns.to_list()
+            photos: list[str] = []
+            import pdb
+
+            pdb.set_trace()
+            for col in columns:
+                if isinstance(col, int):
+                    photos.append(str(col))
+                photos.extend(df[col].to_list())
+        except FileNotFoundError:
+            raise Exception("Ficheiro não existe!")
+        except UnicodeDecodeError as e:
+            raise Exception(f"Erro no conteúdo do ficheiro: {e}")
+        except (OSError, Exception) as e:
+            raise Exception(f"Erro ao ler ficheiro: {e}")
+
+        return Counter([p_filtered for p in photos if (p_filtered := p.strip())])
 
     def read_folder(self, folder_path: str) -> Counter[str]:
         """
